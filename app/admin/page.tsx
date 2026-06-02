@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import StatusButtons from "@/components/StatusButtons";
 import AdminGuard from "@/components/AdminGuard";
