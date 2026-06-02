@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import StatusButtons from "@/components/StatusButtons";
 import AdminGuard from "@/components/AdminGuard";
+import { error } from "console";
 
 const supabase = createSupabaseClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,6 +16,8 @@ export default async function AdminPage() {
     .from("appointments")
     .select("*")
     .order("id", { ascending: false });
+    console.log("APPOINTMENTS:", appointments);
+console.log("ERROR:", error);
 
   const totalLeads = appointments?.length ?? 0;
 
