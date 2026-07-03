@@ -10,23 +10,47 @@ import FAQ from "@/components/FAQ";
 import CTA from "@/components/CTA";
 import Footer from "@/components/Footer";
 import Chatbot from "@/components/Chatbot";
+import HowItWorks from "@/components/HowItWorks";
 
 export default function Home() {
   return (
     <>
+      {/* Home */}
       <Navbar />
       <Hero />
-      <Features />
-      <Services />
-      <WhyChooseUs />
-      <Results />
-      <Testimonials />
-      <MeetTheDoctors />
-      <FAQ />
-      <CTA />
-      <Footer />
-      <Chatbot />
 
+      {/* About */}
+      <WhyChooseUs />
+
+      {/* Services */}
+      <Services />
+
+      {/* AI Features */}
+      <Features />
+
+      {/* How It Works */}
+      <HowItWorks />
+
+      {/* Results */}
+      <Results />
+
+      {/* Reviews */}
+      <Testimonials />
+
+      {/* Dental Team */}
+      <MeetTheDoctors />
+
+      {/* Contact */}
+      <CTA />
+
+      {/* FAQs */}
+      <FAQ />
+
+      {/* Footer */}
+      <Footer />
+
+      {/* Floating AI Chatbot */}
+      <Chatbot />
     </>
   );
 }
