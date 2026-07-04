@@ -18,110 +18,278 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="fixed top-0 left-0 w-full z-50">
-      <div className="max-w-7xl mx-auto px-4 lg:px-8 pt-5">
+    <header className="fixed left-0 top-0 z-50 w-full">
+      <div className="mx-auto max-w-7xl px-3 pt-3 sm:px-4 sm:pt-4 lg:px-8 lg:pt-5">
 
-        <div className="h-[96px] bg-white/90 backdrop-blur-xl border border-slate-200 rounded-[30px] shadow-xl flex items-center justify-between px-6 lg:px-10">
+        {/* ================= MAIN NAVBAR ================= */}
 
-          {/* Logo */}
+        <div
+          className="
+            flex
+            h-[76px]
+            items-center
+            justify-between
+            rounded-[24px]
+            border
+            border-slate-200
+            bg-white/95
+            px-4
+            shadow-xl
+            backdrop-blur-xl
 
-          <a href="/" className="flex items-center">
+            sm:h-[84px]
+            sm:rounded-[26px]
+            sm:px-5
 
+            lg:h-[96px]
+            lg:rounded-[30px]
+            lg:px-8
+
+            xl:px-10
+          "
+        >
+          {/* ================= LOGO ================= */}
+
+          <a
+            href="#"
+            onClick={() => setOpen(false)}
+            className="flex shrink-0 items-center"
+            aria-label="Nova Dental Studio Home"
+          >
             <Image
               src="/images/logo.png"
-              alt="Clinic Logo"
+              alt="Nova Dental Studio"
               width={400}
               height={100}
               priority
-              className="h-[72px] lg:h-[82px] w-auto object-contain"
-            />
+              className="
+                h-[58px]
+                w-auto
+                object-contain
 
+                sm:h-[66px]
+
+                lg:h-[76px]
+
+                xl:h-[82px]
+              "
+            />
           </a>
 
-          {/* Desktop Menu */}
+          {/* ================= DESKTOP MENU ================= */}
 
-          <nav className="hidden lg:flex items-center gap-3">
-
+          <nav className="hidden items-center gap-1 lg:flex xl:gap-2">
             {navLinks.map((item, index) => (
-
               <a
                 key={item.name}
                 href={item.href}
-                className={`px-6 py-3 rounded-full font-medium transition-all duration-300 ${index === 0
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-slate-600 hover:bg-blue-50 hover:text-blue-700"
-                  }`}
+                className={`
+                  whitespace-nowrap
+                  rounded-full
+                  px-3
+                  py-3
+                  text-sm
+                  font-medium
+                  transition-all
+                  duration-300
+
+                  xl:px-4
+                  xl:text-[15px]
+
+                  ${
+                    index === 0
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                  }
+                `}
               >
                 {item.name}
               </a>
-
             ))}
-
           </nav>
 
-          {/* CTA */}
+          {/* ================= DESKTOP CTA ================= */}
 
           <a
             href="#appointment"
-            className="hidden lg:flex items-center gap-2 bg-[#071A52] hover:bg-[#0B2A74] hover:scale-105 transition-all duration-300 text-white rounded-full px-6 py-4 font-semibold shadow-lg whitespace-nowrap shrink-0"
+            className="
+              hidden
+              shrink-0
+              items-center
+              gap-2
+              whitespace-nowrap
+              rounded-full
+              bg-[#071A52]
+              px-5
+              py-3.5
+              text-sm
+              font-semibold
+              text-white
+              shadow-lg
+              transition-all
+              duration-300
+
+              hover:scale-[1.03]
+              hover:bg-[#0B2A74]
+
+              lg:flex
+
+              xl:px-6
+              xl:py-4
+            "
           >
-            <CalendarDays size={18} className="shrink-0" />
+            <CalendarDays
+              size={18}
+              className="shrink-0"
+            />
 
             Book Appointment
           </a>
-          {/* Mobile */}
+
+          {/* ================= MOBILE MENU BUTTON ================= */}
 
           <button
-            onClick={() => setOpen(!open)}
-            className="lg:hidden"
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            aria-label={
+              open
+                ? "Close navigation menu"
+                : "Open navigation menu"
+            }
+            aria-expanded={open}
+            aria-controls="mobile-navigation"
+            className="
+              relative
+              z-[60]
+              flex
+              h-12
+              w-12
+              shrink-0
+              items-center
+              justify-center
+              rounded-xl
+              border
+              border-slate-200
+              bg-white
+              text-black
+              shadow-sm
+              transition-all
+              duration-300
+
+              hover:bg-slate-100
+
+              active:scale-95
+
+              lg:hidden
+            "
           >
             {open ? (
-              <X size={30} />
+              <X
+                size={28}
+                strokeWidth={2.7}
+                className="text-black"
+              />
             ) : (
-              <Menu size={30} />
+              <Menu
+                size={30}
+                strokeWidth={2.7}
+                className="text-black"
+              />
             )}
           </button>
-
         </div>
 
-        {/* Mobile Menu */}
+        {/* ================= MOBILE MENU ================= */}
 
         <div
-          className={`overflow-hidden transition-all duration-300 lg:hidden ${open ? "max-h-[500px] mt-4" : "max-h-0"
-            }`}
+          id="mobile-navigation"
+          className={`
+            overflow-hidden
+            transition-all
+            duration-300
+            ease-in-out
+            lg:hidden
+
+            ${
+              open
+                ? "mt-3 max-h-[650px] opacity-100"
+                : "max-h-0 opacity-0"
+            }
+          `}
         >
+          <div
+            className="
+              rounded-[24px]
+              border
+              border-slate-200
+              bg-white
+              p-4
+              shadow-2xl
 
-          <div className="bg-white rounded-[24px] border border-slate-200 shadow-xl p-6">
-
-            <div className="flex flex-col gap-3">
-
-              {navLinks.map((item) => (
-
+              sm:p-5
+            "
+          >
+            <nav className="flex flex-col gap-1">
+              {navLinks.map((item, index) => (
                 <a
                   key={item.name}
                   href={item.href}
                   onClick={() => setOpen(false)}
-                  className="px-4 py-3 rounded-xl text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition"
+                  className={`
+                    rounded-xl
+                    px-4
+                    py-3.5
+                    text-sm
+                    font-semibold
+                    transition-all
+                    duration-200
+
+                    ${
+                      index === 0
+                        ? "bg-blue-50 text-blue-700"
+                        : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
+                    }
+                  `}
                 >
                   {item.name}
                 </a>
-
               ))}
+
+              {/* Mobile CTA */}
 
               <a
                 href="#appointment"
                 onClick={() => setOpen(false)}
-                className="mt-3 bg-[#071A52] text-white rounded-full py-4 text-center font-semibold"
+                className="
+                  mt-3
+                  flex
+                  items-center
+                  justify-center
+                  gap-2
+                  rounded-full
+                  bg-[#071A52]
+                  px-5
+                  py-4
+                  text-center
+                  text-sm
+                  font-bold
+                  text-white
+                  shadow-lg
+                  transition-all
+                  duration-300
+
+                  hover:bg-[#0B2A74]
+
+                  active:scale-[0.98]
+                "
               >
+                <CalendarDays size={18} />
+
                 Book Appointment
               </a>
-
-            </div>
-
+            </nav>
           </div>
-
         </div>
-
       </div>
     </header>
   );

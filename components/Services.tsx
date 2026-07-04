@@ -26,7 +26,7 @@ const services = [
     title: "Orthodontics",
     description:
       "Modern teeth alignment treatments including clear aligners and braces.",
-    image: "/images/orthodontics.jpg",
+    image: "/images/ortsi.jpg",
   },
   {
     title: "Pediatric Dentistry",

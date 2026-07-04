@@ -199,7 +199,7 @@ export default function Footer() {
                   </p>
 
                   <p className="mt-1 text-[15px] font-medium text-slate-600 transition-colors group-hover:text-blue-600">
-                    +92 300 1234567
+                    +92 321 7618209
                   </p>
                 </div>
               </a>
@@ -236,9 +236,9 @@ export default function Footer() {
                   </p>
 
                   <p className="mt-1 text-[15px] leading-6 text-slate-600">
-                    123 Dental Square,
+                    Dground  People's Colony
                     <br />
-                    Lahore, Pakistan
+                    Faisalabad, Pakistan
                   </p>
                 </div>
               </div>
@@ -279,23 +279,7 @@ export default function Footer() {
         </div>
       </div>
 
-      {/* Floating WhatsApp Button */}
-      <a
-        href="https://wa.me/923001234567"
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Chat on WhatsApp"
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-[0_12px_30px_rgba(37,211,102,0.35)] transition-all duration-300 hover:-translate-y-1 hover:scale-105 hover:shadow-[0_16px_35px_rgba(37,211,102,0.45)]"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          className="h-7 w-7"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path d="M12.04 2C6.52 2 2.03 6.48 2.03 12c0 1.76.46 3.48 1.33 4.99L2 22l5.15-1.35A9.94 9.94 0 0 0 12.04 22C17.56 22 22 17.52 22 12S17.56 2 12.04 2Zm0 18.18a8.2 8.2 0 0 1-4.18-1.14l-.3-.18-3.06.8.82-2.98-.2-.31A8.17 8.17 0 0 1 3.86 12c0-4.51 3.67-8.18 8.18-8.18A8.18 8.18 0 0 1 20.22 12c0 4.51-3.67 8.18-8.18 8.18Zm4.49-6.13c-.25-.12-1.47-.72-1.7-.81-.23-.08-.4-.12-.57.13-.17.25-.65.81-.8.98-.15.17-.3.19-.55.06-.25-.12-1.05-.39-2-1.24-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.01-.38.11-.5.11-.11.25-.29.37-.43.12-.15.16-.25.25-.42.08-.17.04-.31-.02-.44-.06-.12-.57-1.37-.78-1.88-.2-.49-.41-.42-.57-.43h-.48c-.17 0-.44.06-.67.31-.23.25-.88.86-.88 2.1s.9 2.44 1.03 2.61c.12.17 1.77 2.7 4.29 3.79.6.26 1.07.41 1.43.53.6.19 1.15.16 1.58.1.48-.07 1.47-.6 1.68-1.18.21-.58.21-1.08.15-1.18-.06-.1-.23-.16-.48-.29Z" />
-        </svg>
-      </a>
+  
     </footer>
   );
 }

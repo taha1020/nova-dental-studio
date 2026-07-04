@@ -142,9 +142,11 @@ export default function CTA() {
 
               <div className="absolute inset-0 bg-gradient-to-t from-[#061A4A]/90 via-[#061A4A]/15 to-transparent" />
 
-              {/* Left Content */}
 
-              <div className="absolute inset-x-0 bottom-0 p-6 sm:p-8 lg:p-10">
+
+              {/* Left Content - Hidden on Mobile */}
+
+              <div className="absolute inset-x-0 bottom-0 hidden md:block p-6 sm:p-8 lg:p-10">
 
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-2 text-xs font-bold text-white backdrop-blur-xl">
                   <CheckCircle2
