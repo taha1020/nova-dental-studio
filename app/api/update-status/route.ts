@@ -6,10 +6,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 
 const supabaseAnonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+const adminEmail =
+  process.env.ADMIN_EMAIL?.trim();
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -29,7 +32,9 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const id = Number(body?.id);
-    const status = String(body?.status ?? "").trim();
+    const status = String(
+      body?.status ?? ""
+    ).trim();
 
     console.log("STATUS UPDATE REQUEST:", {
       id,
@@ -40,7 +45,10 @@ export async function POST(req: Request) {
     // 2. VALIDATE REQUEST
     // =========================================
 
-    if (!Number.isFinite(id) || id <= 0) {
+    if (
+      !Number.isInteger(id) ||
+      id <= 0
+    ) {
       return NextResponse.json(
         {
           success: false,
@@ -70,12 +78,12 @@ export async function POST(req: Request) {
     }
 
     // =========================================
-    // 3. CHECK SUPABASE CONFIG
+    // 3. CHECK DATABASE CONFIG
     // =========================================
 
     if (!supabaseUrl || !supabaseAnonKey) {
       console.error(
-        "UPDATE STATUS: Missing Supabase configuration"
+        "SUPABASE CONFIGURATION MISSING"
       );
 
       return NextResponse.json(
@@ -90,6 +98,10 @@ export async function POST(req: Request) {
       );
     }
 
+    // =========================================
+    // 4. CREATE SERVER SUPABASE CLIENT
+    // =========================================
+
     const supabase = createClient(
       supabaseUrl,
       supabaseAnonKey,
@@ -103,7 +115,7 @@ export async function POST(req: Request) {
     );
 
     // =========================================
-    // 4. FETCH APPOINTMENT FIRST
+    // 5. FETCH APPOINTMENT
     // =========================================
 
     const {
@@ -143,8 +155,13 @@ export async function POST(req: Request) {
       );
     }
 
+    console.log(
+      "APPOINTMENT FOUND:",
+      appointment
+    );
+
     // =========================================
-    // 5. UPDATE DATABASE STATUS
+    // 6. UPDATE APPOINTMENT STATUS
     // =========================================
 
     const {
@@ -187,19 +204,31 @@ export async function POST(req: Request) {
     );
 
     // =========================================
-    // 6. SEND PATIENT EMAIL
+    // 7. PREPARE ADMIN EMAIL
     // =========================================
 
     let emailSent = false;
     let emailError: string | null = null;
 
-    const patientEmail =
-      appointment.email?.trim();
+    if (!adminEmail) {
+      console.error(
+        "ADMIN_EMAIL ENV VARIABLE MISSING"
+      );
 
-    if (patientEmail) {
+      emailError =
+        "ADMIN_EMAIL is not configured.";
+    } else {
       try {
         const patientName = escapeHtml(
           appointment.name || "Patient"
+        );
+
+        const patientPhone = escapeHtml(
+          appointment.phone || "Not provided"
+        );
+
+        const patientEmail = escapeHtml(
+          appointment.email || "Not provided"
         );
 
         const treatment = escapeHtml(
@@ -209,16 +238,16 @@ export async function POST(req: Request) {
 
         const appointmentDate = escapeHtml(
           appointment.appointment_date ||
-            "To be confirmed"
+            "Not specified"
         );
 
         const appointmentTime = escapeHtml(
           appointment.appointment_time ||
-            "To be confirmed"
+            "Not specified"
         );
 
         // =====================================
-        // CONFIRMED EMAIL
+        // 8. CONFIRMED NOTIFICATION
         // =====================================
 
         if (status === "Confirmed") {
@@ -227,10 +256,11 @@ export async function POST(req: Request) {
               from:
                 "Nova Dental Studio <onboarding@resend.dev>",
 
-              to: patientEmail,
+              // Send to your allowed Resend email
+              to: adminEmail,
 
               subject:
-                "Your Appointment Is Confirmed ✅",
+                `✅ Appointment Approved | ${appointment.name || "Patient"}`,
 
               html: `
                 <div
@@ -243,67 +273,86 @@ export async function POST(req: Request) {
                 >
                   <div
                     style="
-                      max-width:600px;
+                      max-width:620px;
                       margin:0 auto;
                       background:#ffffff;
+                      border:1px solid #e2e8f0;
                       border-radius:20px;
                       overflow:hidden;
-                      border:1px solid #e2e8f0;
                     "
                   >
                     <div
                       style="
-                        background:#071A52;
                         padding:28px;
-                        text-align:center;
+                        background:#071A52;
+                        color:#ffffff;
                       "
                     >
+                      <p
+                        style="
+                          margin:0 0 8px;
+                          color:#67e8f9;
+                          font-size:12px;
+                          font-weight:bold;
+                          text-transform:uppercase;
+                          letter-spacing:1px;
+                        "
+                      >
+                        Nova Clinic Operations
+                      </p>
+
                       <h1
                         style="
                           margin:0;
-                          color:#ffffff;
-                          font-size:24px;
+                          font-size:25px;
                         "
                       >
-                        Appointment Confirmed
+                        Appointment Approved
                       </h1>
                     </div>
 
                     <div
                       style="
-                        padding:32px 28px;
+                        padding:30px 28px;
                         color:#334155;
                       "
                     >
                       <p
                         style="
                           margin-top:0;
-                          font-size:16px;
-                        "
-                      >
-                        Dear ${patientName},
-                      </p>
-
-                      <p
-                        style="
                           font-size:15px;
                           line-height:1.7;
                         "
                       >
-                        Good news! Your appointment
-                        request has been approved by
-                        our clinic team.
+                        The following appointment
+                        request has been approved
+                        from the Nova Admin Dashboard.
                       </p>
 
                       <div
                         style="
                           margin:24px 0;
                           padding:20px;
-                          background:#f8fafc;
+                          background:#ecfdf5;
+                          border:1px solid #a7f3d0;
                           border-radius:14px;
-                          border:1px solid #e2e8f0;
                         "
                       >
+                        <p style="margin:0 0 12px;">
+                          <strong>Patient:</strong>
+                          ${patientName}
+                        </p>
+
+                        <p style="margin:0 0 12px;">
+                          <strong>Phone:</strong>
+                          ${patientPhone}
+                        </p>
+
+                        <p style="margin:0 0 12px;">
+                          <strong>Patient Email:</strong>
+                          ${patientEmail}
+                        </p>
+
                         <p style="margin:0 0 12px;">
                           <strong>Treatment:</strong>
                           ${treatment}
@@ -320,28 +369,41 @@ export async function POST(req: Request) {
                         </p>
                       </div>
 
-                      <p
+                      <div
                         style="
-                          font-size:15px;
-                          line-height:1.7;
+                          margin-top:20px;
+                          padding:16px;
+                          background:#f8fafc;
+                          border-radius:12px;
+                          border:1px solid #e2e8f0;
                         "
                       >
-                        We look forward to welcoming
-                        you to Nova Dental Studio.
-                        See you soon!
-                      </p>
+                        <p
+                          style="
+                            margin:0;
+                            color:#475569;
+                            font-size:13px;
+                            line-height:1.6;
+                          "
+                        >
+                          <strong>
+                            System Status:
+                          </strong>
+                          Confirmed
+                        </p>
+                      </div>
 
                       <p
                         style="
-                          margin-bottom:0;
-                          font-size:15px;
-                          line-height:1.7;
+                          margin:24px 0 0;
+                          color:#64748b;
+                          font-size:13px;
+                          line-height:1.6;
                         "
                       >
-                        Best Regards,<br />
-                        <strong>
-                          Nova Dental Studio
-                        </strong>
+                        This is an automated clinic
+                        operations notification from
+                        Nova Dental Studio.
                       </p>
                     </div>
                   </div>
@@ -358,13 +420,13 @@ export async function POST(req: Request) {
           emailSent = true;
 
           console.log(
-            "CONFIRMATION EMAIL SENT:",
+            "ADMIN CONFIRMATION EMAIL SENT:",
             result.data
           );
         }
 
         // =====================================
-        // REJECTED EMAIL
+        // 9. REJECTED NOTIFICATION
         // =====================================
 
         if (status === "Rejected") {
@@ -373,10 +435,11 @@ export async function POST(req: Request) {
               from:
                 "Nova Dental Studio <onboarding@resend.dev>",
 
-              to: patientEmail,
+              // Send to your allowed Resend email
+              to: adminEmail,
 
               subject:
-                "Update About Your Appointment Request",
+                `❌ Appointment Rejected | ${appointment.name || "Patient"}`,
 
               html: `
                 <div
@@ -389,79 +452,86 @@ export async function POST(req: Request) {
                 >
                   <div
                     style="
-                      max-width:600px;
+                      max-width:620px;
                       margin:0 auto;
                       background:#ffffff;
+                      border:1px solid #e2e8f0;
                       border-radius:20px;
                       overflow:hidden;
-                      border:1px solid #e2e8f0;
                     "
                   >
                     <div
                       style="
-                        background:#071A52;
                         padding:28px;
-                        text-align:center;
+                        background:#071A52;
+                        color:#ffffff;
                       "
                     >
+                      <p
+                        style="
+                          margin:0 0 8px;
+                          color:#67e8f9;
+                          font-size:12px;
+                          font-weight:bold;
+                          text-transform:uppercase;
+                          letter-spacing:1px;
+                        "
+                      >
+                        Nova Clinic Operations
+                      </p>
+
                       <h1
                         style="
                           margin:0;
-                          color:#ffffff;
-                          font-size:24px;
+                          font-size:25px;
                         "
                       >
-                        Appointment Update
+                        Appointment Rejected
                       </h1>
                     </div>
 
                     <div
                       style="
-                        padding:32px 28px;
+                        padding:30px 28px;
                         color:#334155;
                       "
                     >
                       <p
                         style="
                           margin-top:0;
-                          font-size:16px;
-                        "
-                      >
-                        Dear ${patientName},
-                      </p>
-
-                      <p
-                        style="
                           font-size:15px;
                           line-height:1.7;
                         "
                       >
-                        Thank you for choosing
-                        Nova Dental Studio.
-                      </p>
-
-                      <p
-                        style="
-                          font-size:15px;
-                          line-height:1.7;
-                        "
-                      >
-                        Due to high appointment
-                        demand and current schedule
-                        availability, we are unable
-                        to confirm your requested
-                        appointment slot at this time.
+                        The following appointment
+                        request has been rejected
+                        from the Nova Admin Dashboard.
                       </p>
 
                       <div
                         style="
                           margin:24px 0;
                           padding:20px;
-                          background:#fff7ed;
+                          background:#fff1f2;
+                          border:1px solid #fecdd3;
                           border-radius:14px;
-                          border:1px solid #fed7aa;
                         "
                       >
+                        <p style="margin:0 0 12px;">
+                          <strong>Patient:</strong>
+                          ${patientName}
+                        </p>
+
+                        <p style="margin:0 0 12px;">
+                          <strong>Phone:</strong>
+                          ${patientPhone}
+                        </p>
+
+                        <p style="margin:0 0 12px;">
+                          <strong>Patient Email:</strong>
+                          ${patientEmail}
+                        </p>
+
                         <p style="margin:0 0 12px;">
                           <strong>Treatment:</strong>
                           ${treatment}
@@ -478,30 +548,41 @@ export async function POST(req: Request) {
                         </p>
                       </div>
 
-                      <p
+                      <div
                         style="
-                          font-size:15px;
-                          line-height:1.7;
+                          margin-top:20px;
+                          padding:16px;
+                          background:#f8fafc;
+                          border-radius:12px;
+                          border:1px solid #e2e8f0;
                         "
                       >
-                        You are welcome to submit a
-                        new appointment request for
-                        another preferred date or time,
-                        and our team will be happy to
-                        assist you.
-                      </p>
+                        <p
+                          style="
+                            margin:0;
+                            color:#475569;
+                            font-size:13px;
+                            line-height:1.6;
+                          "
+                        >
+                          <strong>
+                            System Status:
+                          </strong>
+                          Rejected
+                        </p>
+                      </div>
 
                       <p
                         style="
-                          margin-bottom:0;
-                          font-size:15px;
-                          line-height:1.7;
+                          margin:24px 0 0;
+                          color:#64748b;
+                          font-size:13px;
+                          line-height:1.6;
                         "
                       >
-                        Best Regards,<br />
-                        <strong>
-                          Nova Dental Studio
-                        </strong>
+                        This is an automated clinic
+                        operations notification from
+                        Nova Dental Studio.
                       </p>
                     </div>
                   </div>
@@ -518,7 +599,7 @@ export async function POST(req: Request) {
           emailSent = true;
 
           console.log(
-            "REJECTION EMAIL SENT:",
+            "ADMIN REJECTION EMAIL SENT:",
             result.data
           );
         }
@@ -529,14 +610,14 @@ export async function POST(req: Request) {
             : "Email delivery failed.";
 
         console.error(
-          "PATIENT EMAIL ERROR:",
+          "ADMIN STATUS EMAIL ERROR:",
           error
         );
       }
     }
 
     // =========================================
-    // 7. FINAL RESPONSE
+    // 10. FINAL RESPONSE
     // =========================================
 
     return NextResponse.json({
@@ -546,8 +627,8 @@ export async function POST(req: Request) {
       emailSent,
       emailError,
       message: emailSent
-        ? `Appointment ${status.toLowerCase()} and patient email sent successfully.`
-        : `Appointment ${status.toLowerCase()} successfully.`,
+        ? `Appointment ${status.toLowerCase()} and admin notification sent successfully.`
+        : `Appointment ${status.toLowerCase()} successfully, but admin notification was not sent.`,
     });
   } catch (error) {
     console.error(
