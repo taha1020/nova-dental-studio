@@ -46,6 +46,132 @@ type StatusFilter =
   | "confirmed"
   | "rejected";
 
+
+function cleanPatientName(name: string | null) {
+  if (!name?.trim()) return "Unknown Patient";
+
+  let value = name
+    .trim()
+    .replace(
+      /^(?:hi[,\s]+)?(?:my\s+(?:full\s+)?name\s+is|the\s+name\s+is|i\s+am|i'm|this\s+is|call\s+me)\s+/i,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  value = value
+    .split(
+      /\b(?:and\s+i|and\s+my|i\s+want|i\s+need|because|for\s+an?\s+appointment)\b/i
+    )[0]
+    .trim();
+
+  if (!value) return "Unknown Patient";
+
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((part) =>
+      part
+        .split("-")
+        .map(
+          (piece) =>
+            piece.charAt(0).toUpperCase() +
+            piece.slice(1).toLowerCase()
+        )
+        .join("-")
+    )
+    .join(" ");
+}
+
+const TREATMENT_ALIASES = [
+  {
+    name: "Teeth Whitening",
+    phrases: [
+      "teeth whitening",
+      "tooth whitening",
+      "whitening",
+      "white teeth",
+      "brighten my teeth",
+    ],
+  },
+  {
+    name: "Dental Implants",
+    phrases: [
+      "dental implants",
+      "dental implant",
+      "tooth implant",
+      "implants",
+      "implant",
+    ],
+  },
+  {
+    name: "Root Canal Treatment",
+    phrases: ["root canal treatment", "root canal", "rct"],
+  },
+  {
+    name: "Orthodontics",
+    phrases: [
+      "orthodontics",
+      "orthodontic",
+      "braces",
+      "teeth alignment",
+      "aligners",
+      "clear aligners",
+    ],
+  },
+  {
+    name: "Cosmetic Dentistry",
+    phrases: [
+      "cosmetic dentistry",
+      "cosmetic dental",
+      "smile makeover",
+      "veneers",
+      "dental veneers",
+    ],
+  },
+  {
+    name: "General Dentistry",
+    phrases: [
+      "general dentistry",
+      "general dental",
+      "checkup",
+      "check up",
+      "dental cleaning",
+      "cleaning",
+    ],
+  },
+  {
+    name: "Emergency Dental Care",
+    phrases: [
+      "emergency dental care",
+      "dental emergency",
+      "emergency dentist",
+      "urgent dental",
+      "severe tooth pain",
+      "toothache",
+    ],
+  },
+] as const;
+
+function getCleanTreatment(treatment: string | null) {
+  if (!treatment?.trim()) return "General Inquiry";
+
+  const value = treatment
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, " ")
+    .replace(/\s+/g, " ");
+
+  for (const item of TREATMENT_ALIASES) {
+    if (item.phrases.some((phrase) => value.includes(phrase))) {
+      return item.name;
+    }
+  }
+
+  return treatment.trim();
+}
+
 function normalizeStatus(status: string | null) {
   const value = status?.trim().toLowerCase() || "pending";
 
@@ -78,9 +204,11 @@ function getStatusClasses(status: string | null) {
 }
 
 function getInitials(name: string | null) {
-  if (!name?.trim()) return "PT";
+  const cleanedName = cleanPatientName(name);
 
-  return name
+  if (cleanedName === "Unknown Patient") return "PT";
+
+  return cleanedName
     .trim()
     .split(/\s+/)
     .slice(0, 2)
@@ -188,7 +316,7 @@ export default function AdminDashboard({
   const treatments = useMemo(() => {
     const values = appointments
       .map((appointment) =>
-        appointment.treatment?.trim()
+        getCleanTreatment(appointment.treatment)
       )
       .filter(
         (value): value is string => Boolean(value)
@@ -218,14 +346,14 @@ export default function AdminDashboard({
 
         const matchesTreatment =
           treatmentFilter === "all" ||
-          appointment.treatment?.trim() ===
+          getCleanTreatment(appointment.treatment) ===
             treatmentFilter;
 
         const searchableText = [
-          appointment.name,
+          cleanPatientName(appointment.name),
           appointment.phone,
           appointment.email,
-          appointment.treatment,
+          getCleanTreatment(appointment.treatment),
           appointment.appointment_date,
           appointment.appointment_time,
           appointment.status,
@@ -868,8 +996,7 @@ export default function AdminDashboard({
 
                           <div className="min-w-0">
                             <h3 className="truncate text-[15px] font-extrabold text-slate-950">
-                              {appointment.name ||
-                                "Unknown Patient"}
+                              {cleanPatientName(appointment.name)}
                             </h3>
 
                             <p className="mt-0.5 text-[11px] text-slate-400">
@@ -908,8 +1035,7 @@ export default function AdminDashboard({
                             </p>
 
                             <p className="mt-1 break-words text-sm font-extrabold text-slate-900">
-                              {appointment.treatment ||
-                                "General Inquiry"}
+                              {getCleanTreatment(appointment.treatment)}
                             </p>
                           </div>
 
@@ -1111,8 +1237,7 @@ export default function AdminDashboard({
 
                             <div className="min-w-0">
                               <p className="max-w-[180px] truncate text-sm font-bold text-slate-900">
-                                {appointment.name ||
-                                  "Unknown Patient"}
+                                {cleanPatientName(appointment.name)}
                               </p>
 
                               <p className="mt-1 text-[11px] text-slate-400">
@@ -1135,8 +1260,7 @@ export default function AdminDashboard({
                         <td className="px-5 py-4">
                           <span className="inline-flex max-w-[190px] rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-700">
                             <span className="truncate">
-                              {appointment.treatment ||
-                                "General Inquiry"}
+                              {getCleanTreatment(appointment.treatment)}
                             </span>
                           </span>
                         </td>
@@ -1240,8 +1364,7 @@ export default function AdminDashboard({
 
                   <div className="min-w-0">
                     <h2 className="truncate text-lg font-extrabold text-slate-950">
-                      {selectedAppointment.name ||
-                        "Unknown Patient"}
+                      {cleanPatientName(selectedAppointment.name)}
                     </h2>
 
                     <p className="mt-1 text-xs font-medium text-slate-400">
@@ -1342,8 +1465,7 @@ export default function AdminDashboard({
                       </p>
 
                       <p className="mt-1 text-sm font-extrabold text-slate-900">
-                        {selectedAppointment.treatment ||
-                          "General Inquiry"}
+                        {getCleanTreatment(selectedAppointment.treatment)}
                       </p>
                     </div>
                   </div>
