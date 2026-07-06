@@ -84,7 +84,23 @@ function cleanPatientName(name: string | null) {
     .join(" ");
 }
 
-const TREATMENT_ALIASES = [
+const OFFICIAL_TREATMENTS = [
+  "Teeth Whitening",
+  "Dental Implants",
+  "Root Canal Treatment",
+  "Orthodontics",
+  "Cosmetic Dentistry",
+  "General Dentistry",
+  "Emergency Dental Care",
+] as const;
+
+type OfficialTreatment =
+  (typeof OFFICIAL_TREATMENTS)[number];
+
+const TREATMENT_ALIASES: {
+  name: OfficialTreatment;
+  phrases: string[];
+}[] = [
   {
     name: "Teeth Whitening",
     phrases: [
@@ -93,6 +109,13 @@ const TREATMENT_ALIASES = [
       "whitening",
       "white teeth",
       "brighten my teeth",
+      "brighten teeth",
+      "yellow teeth",
+      "teeth bleaching",
+      "tooth bleaching",
+      "interested in teeth whitening",
+      "want teeth whitening",
+      "need teeth whitening",
     ],
   },
   {
@@ -101,13 +124,22 @@ const TREATMENT_ALIASES = [
       "dental implants",
       "dental implant",
       "tooth implant",
-      "implants",
+      "tooth implants",
       "implant",
+      "implants",
+      "missing tooth replacement",
+      "replace missing tooth",
     ],
   },
   {
     name: "Root Canal Treatment",
-    phrases: ["root canal treatment", "root canal", "rct"],
+    phrases: [
+      "root canal treatment",
+      "root canal",
+      "rct",
+      "root treatment",
+      "infected tooth treatment",
+    ],
   },
   {
     name: "Orthodontics",
@@ -118,6 +150,8 @@ const TREATMENT_ALIASES = [
       "teeth alignment",
       "aligners",
       "clear aligners",
+      "straighten teeth",
+      "crooked teeth",
     ],
   },
   {
@@ -128,6 +162,8 @@ const TREATMENT_ALIASES = [
       "smile makeover",
       "veneers",
       "dental veneers",
+      "improve my smile",
+      "cosmetic treatment",
     ],
   },
   {
@@ -137,7 +173,11 @@ const TREATMENT_ALIASES = [
       "general dental",
       "checkup",
       "check up",
+      "dental checkup",
+      "dental check up",
+      "routine checkup",
       "dental cleaning",
+      "teeth cleaning",
       "cleaning",
     ],
   },
@@ -148,28 +188,59 @@ const TREATMENT_ALIASES = [
       "dental emergency",
       "emergency dentist",
       "urgent dental",
+      "urgent dentist",
       "severe tooth pain",
       "toothache",
+      "tooth pain",
+      "broken tooth",
+      "swollen gums",
     ],
   },
-] as const;
+];
 
-function getCleanTreatment(treatment: string | null) {
-  if (!treatment?.trim()) return "General Inquiry";
-
-  const value = treatment
+function normalizeTreatmentText(
+  treatment: string | null
+) {
+  return (treatment ?? "")
     .trim()
     .toLowerCase()
+    .replace(/[_/\\|]+/g, " ")
     .replace(/[^\w\s-]/g, " ")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCleanTreatment(
+  treatment: string | null
+): OfficialTreatment | null {
+  const value = normalizeTreatmentText(treatment);
+
+  if (!value) {
+    return null;
+  }
 
   for (const item of TREATMENT_ALIASES) {
-    if (item.phrases.some((phrase) => value.includes(phrase))) {
+    const matched = item.phrases.some(
+      (phrase) =>
+        value === phrase ||
+        value.includes(phrase)
+    );
+
+    if (matched) {
       return item.name;
     }
   }
 
-  return treatment.trim();
+  return null;
+}
+
+function getTreatmentDisplay(
+  treatment: string | null
+) {
+  return (
+    getCleanTreatment(treatment) ??
+    "Unrecognized Request"
+  );
 }
 
 function normalizeStatus(status: string | null) {
@@ -312,20 +383,7 @@ export default function AdminDashboard({
   // =========================
   // UNIQUE TREATMENTS
   // =========================
-
-  const treatments = useMemo(() => {
-    const values = appointments
-      .map((appointment) =>
-        getCleanTreatment(appointment.treatment)
-      )
-      .filter(
-        (value): value is string => Boolean(value)
-      );
-
-    return Array.from(new Set(values)).sort((a, b) =>
-      a.localeCompare(b)
-    );
-  }, [appointments]);
+  const treatments = OFFICIAL_TREATMENTS;
 
   // =========================
   // SEARCH + FILTERING
@@ -344,16 +402,18 @@ export default function AdminDashboard({
           statusFilter === "all" ||
           status === statusFilter;
 
+        const normalizedTreatment =
+          getCleanTreatment(appointment.treatment);
+
         const matchesTreatment =
           treatmentFilter === "all" ||
-          getCleanTreatment(appointment.treatment) ===
-            treatmentFilter;
+          normalizedTreatment === treatmentFilter;
 
         const searchableText = [
           cleanPatientName(appointment.name),
           appointment.phone,
           appointment.email,
-          getCleanTreatment(appointment.treatment),
+          getTreatmentDisplay(appointment.treatment),
           appointment.appointment_date,
           appointment.appointment_time,
           appointment.status,
@@ -1035,7 +1095,7 @@ export default function AdminDashboard({
                             </p>
 
                             <p className="mt-1 break-words text-sm font-extrabold text-slate-900">
-                              {getCleanTreatment(appointment.treatment)}
+                              {getTreatmentDisplay(appointment.treatment)}
                             </p>
                           </div>
 
@@ -1260,7 +1320,7 @@ export default function AdminDashboard({
                         <td className="px-5 py-4">
                           <span className="inline-flex max-w-[190px] rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1.5 text-xs font-bold text-cyan-700">
                             <span className="truncate">
-                              {getCleanTreatment(appointment.treatment)}
+                              {getTreatmentDisplay(appointment.treatment)}
                             </span>
                           </span>
                         </td>
@@ -1465,7 +1525,7 @@ export default function AdminDashboard({
                       </p>
 
                       <p className="mt-1 text-sm font-extrabold text-slate-900">
-                        {getCleanTreatment(selectedAppointment.treatment)}
+                        {getTreatmentDisplay(selectedAppointment.treatment)}
                       </p>
                     </div>
                   </div>

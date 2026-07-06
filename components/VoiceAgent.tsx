@@ -84,12 +84,12 @@ type SpeechRecognitionLike = {
   abort: () => void;
 
   onresult:
-    | ((event: SpeechRecognitionEventLike) => void)
-    | null;
+  | ((event: SpeechRecognitionEventLike) => void)
+  | null;
 
   onerror:
-    | ((event: SpeechRecognitionErrorEventLike) => void)
-    | null;
+  | ((event: SpeechRecognitionErrorEventLike) => void)
+  | null;
 
   onend: (() => void) | null;
 };
@@ -121,16 +121,9 @@ const EMPTY_BOOKING: BookingData = {
 };
 
 const STOP_PHRASES = [
-  "stop",
-  "stop it",
-  "okay stop",
-  "ok stop",
-  "nova stop",
-  "please stop",
-  "wait",
-  "wait please",
-  "hold on",
-  "be quiet",
+  "stop", "stop it", "stop please", "please stop", "nova stop",
+  "okay stop", "ok stop", "wait", "wait please", "hold on",
+  "pause", "pause please", "enough", "be quiet", "quiet",
   "cancel speech",
 ];
 
@@ -163,11 +156,52 @@ function normalize(value: string) {
 
 function isStopCommand(value: string) {
   const text = normalize(value);
+  if (!text || text.split(" ").length > 6) return false;
+
+  const cleaned = text
+    .replace(/^(?:hey\s+)?nova\s+/, "")
+    .replace(/^(?:okay|ok|please)\s+/, "")
+    .replace(/\s+(?:please|now)$/, "")
+    .trim();
 
   return STOP_PHRASES.some(
-    (phrase) =>
-      text === phrase ||
-      text.includes(phrase)
+    (phrase) => cleaned === normalize(phrase)
+  );
+}
+
+function isImmediateStopCommand(value: string) {
+  const text = normalize(value);
+  if (!text) return false;
+
+  // Fast barge-in matcher. Intentionally short and strict enough to avoid
+  // stopping on normal dental questions containing the word "stop".
+  return /^(?:(?:hey\s+)?nova\s+)?(?:(?:okay|ok|please)\s+)?(?:stop|stop it|wait|hold on|pause|enough|quiet|be quiet)(?:\s+(?:please|now))?$/.test(text);
+}
+
+function tokenSimilarity(a: string, b: string) {
+  const left = new Set(normalize(a).split(" ").filter(Boolean));
+  const right = new Set(normalize(b).split(" ").filter(Boolean));
+  if (!left.size || !right.size) return 0;
+
+  let overlap = 0;
+  left.forEach((word) => {
+    if (right.has(word)) overlap += 1;
+  });
+
+  return overlap / Math.max(1, Math.min(left.size, right.size));
+}
+
+function looksLikeOwnSpeech(heard: string, ownSpeech: string) {
+  const heardText = normalize(heard);
+  const ownText = normalize(ownSpeech);
+
+  if (!heardText || !ownText) return false;
+  if (heardText.length < 5) return false;
+
+  return (
+    ownText.includes(heardText) ||
+    heardText.includes(ownText.slice(0, Math.min(55, ownText.length))) ||
+    tokenSimilarity(heardText, ownText) >= 0.82
   );
 }
 
@@ -226,11 +260,48 @@ function isNo(value: string) {
    VOICE BOOKING CLEANERS
 ========================================================= */
 
-function cleanPatientName(input: string) {
+function cleanPatientName(input: string): string | null {
   let value = input.trim();
-  value = value.replace(/^(?:hi[,\s]+)?(?:my\s+(?:full\s+)?name\s+is|the\s+name\s+is|i\s+am|i'm|this\s+is|call\s+me)\s+/i, "").replace(/\s+/g, " ").trim();
-  value = value.split(/\b(?:and\s+i|and\s+my|i\s+want|i\s+need|because|for\s+an?\s+appointment)\b/i)[0].trim();
-  return value.split(" ").filter(Boolean).slice(0, 6).map((part) => part.split("-").map((piece) => piece.charAt(0).toUpperCase() + piece.slice(1).toLowerCase()).join("-")).join(" ");
+
+  value = value
+    .replace(
+      /^(?:hi[,.\s]+)?(?:my\s+(?:full\s+)?name\s+is|the\s+name\s+is|i\s+am|i'm|this\s+is|call\s+me)\s+/i,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Never save a sentence, phone number, email, or booking intent as a name.
+  if (
+    !value ||
+    value.length < 2 ||
+    value.length > 60 ||
+    /[@\d]/.test(value) ||
+    /\b(?:appointment|book|booking|treatment|phone|email|whitening|implant|root canal|dentist|dental)\b/i.test(value)
+  ) {
+    return null;
+  }
+
+  const parts = value.split(" ").filter(Boolean);
+  if (parts.length < 1 || parts.length > 5) return null;
+
+  // Human names: Unicode letters plus apostrophe/hyphen only.
+  if (!parts.every((part) => /^[\p{L}][\p{L}'’.-]*$/u.test(part))) {
+    return null;
+  }
+
+  return parts
+    .map((part) =>
+      part
+        .split("-")
+        .map(
+          (piece) =>
+            piece.charAt(0).toUpperCase() +
+            piece.slice(1).toLowerCase()
+        )
+        .join("-")
+    )
+    .join(" ");
 }
 
 const CANONICAL_TREATMENTS = [
@@ -251,82 +322,142 @@ function normalizeTreatment(input: string): string | null {
   return null;
 }
 
+
+function wordsToDigits(input: string) {
+  const map: Record<string, string> = {
+    zero: "0", oh: "0", o: "0", one: "1", won: "1",
+    two: "2", to: "2", too: "2", three: "3",
+    four: "4", for: "4", five: "5", six: "6",
+    seven: "7", eight: "8", ate: "8", nine: "9"
+  };
+  return normalize(input).split(" ").map(x => map[x] ?? x).join(" ");
+}
+
+function normalizePhone(input: string): string | null {
+  let digits = wordsToDigits(input)
+    .replace(/\b(?:my|phone|number|is|mobile|contact)\b/g, " ")
+    .replace(/\D/g, "");
+  if (digits.startsWith("92") && digits.length === 12) digits = `0${digits.slice(2)}`;
+  if (digits.startsWith("3") && digits.length === 10) digits = `0${digits}`;
+  if (/^03\d{9}$/.test(digits)) return digits;
+  if (digits.length >= 10 && digits.length <= 15) return input.trim().startsWith("+") ? `+${digits}` : digits;
+  return null;
+}
+
+function normalizeEmail(input: string): string | null {
+  let value = normalize(input)
+    .replace(/\bmy email(?: address)? is\b/g, " ")
+    .replace(/\s+(?:at|add)\s+/g, "@")
+    .replace(/\s+dot\s+/g, ".")
+    .replace(/\s+underscore\s+/g, "_")
+    .replace(/\s+(?:dash|hyphen)\s+/g, "-")
+    .replace(/\s+/g, "");
+  value = value
+    .replace(/@gmailcom$/, "@gmail.com")
+    .replace(/@outlookcom$/, "@outlook.com")
+    .replace(/@hotmailcom$/, "@hotmail.com")
+    .replace(/@yahoocom$/, "@yahoo.com");
+  return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value) ? value : null;
+}
+
+function speakablePhone(value: string) { return value.replace(/\D/g, "").split("").join(" "); }
+function speakableEmail(value: string) { return value.replace("@", " at ").replace(/\./g, " dot ").replace(/_/g, " underscore ").replace(/-/g, " dash "); }
+
 /* =========================================================
    DATE NORMALIZER
 ========================================================= */
 
-function normalizeDate(
-  input: string
-): string | null {
-  const raw = input.trim();
+function normalizeDate(input: string): string | null {
+  const raw = normalize(input);
+  if (!raw) return null;
 
-  // 2026-08-12
-  const iso = raw.match(
-    /^(\d{4})[-/ ](\d{1,2})[-/ ](\d{1,2})$/
-  );
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
+  const toISO = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+  if (raw === "today") return toISO(today);
+
+  if (raw === "tomorrow") {
+    const d = new Date(today);
+    d.setDate(d.getDate() + 1);
+    return toISO(d);
+  }
+
+  // "next monday", or a weekday name. A bare weekday means the next occurrence.
+  const weekdayMap: Record<string, number> = {
+    sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+    thursday: 4, friday: 5, saturday: 6,
+  };
+  const weekdayMatch = raw.match(/^(?:next\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/);
+  if (weekdayMatch) {
+    const target = weekdayMap[weekdayMatch[1]];
+    let delta = (target - today.getDay() + 7) % 7;
+    if (delta === 0 || raw.startsWith("next ")) delta += 7;
+    const d = new Date(today);
+    d.setDate(d.getDate() + delta);
+    return toISO(d);
+  }
+
+  const iso = raw.match(/^(\d{4})[-/ ](\d{1,2})[-/ ](\d{1,2})$/);
   if (iso) {
     const year = Number(iso[1]);
     const month = Number(iso[2]);
     const day = Number(iso[3]);
-
-    const date = new Date(
-      year,
-      month - 1,
-      day
-    );
-
+    const date = new Date(year, month - 1, day);
     if (
       date.getFullYear() === year &&
       date.getMonth() === month - 1 &&
       date.getDate() === day
-    ) {
-      return `${year}-${String(month).padStart(
-        2,
-        "0"
-      )}-${String(day).padStart(2, "0")}`;
-    }
+    ) return toISO(date);
+    return null;
   }
 
-  // 12/08/2026
-  const dmy = raw.match(
-    /^(\d{1,2})[-/ ](\d{1,2})[-/ ](\d{4})$/
-  );
-
+  const dmy = raw.match(/^(\d{1,2})[-/ ](\d{1,2})[-/ ](\d{4})$/);
   if (dmy) {
     const day = Number(dmy[1]);
     const month = Number(dmy[2]);
     const year = Number(dmy[3]);
-
-    const date = new Date(
-      year,
-      month - 1,
-      day
-    );
-
+    const date = new Date(year, month - 1, day);
     if (
       date.getFullYear() === year &&
       date.getMonth() === month - 1 &&
       date.getDate() === day
-    ) {
-      return `${year}-${String(month).padStart(
-        2,
-        "0"
-      )}-${String(day).padStart(2, "0")}`;
-    }
+    ) return toISO(date);
+    return null;
   }
 
-  // Natural:
-  // 12 August 2026
-  // August 12 2026
-  const parsed = new Date(raw);
+  // Month names are intentionally parsed only when a real date is present.
+  const natural = raw.match(
+    /^(?:(\d{1,2})\s+([a-z]+)|([a-z]+)\s+(\d{1,2}))(?:\s+(\d{4}))?$/
+  );
+  if (natural) {
+    const monthNames: Record<string, number> = {
+      january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2,
+      april: 3, apr: 3, may: 4, june: 5, jun: 5, july: 6, jul: 6,
+      august: 7, aug: 7, september: 8, sep: 8, sept: 8,
+      october: 9, oct: 9, november: 10, nov: 10, december: 11, dec: 11,
+    };
+    const day = Number(natural[1] ?? natural[4]);
+    const monthWord = natural[2] ?? natural[3];
+    const month = monthNames[monthWord];
+    let year = natural[5] ? Number(natural[5]) : today.getFullYear();
+    if (month === undefined) return null;
 
-  if (!Number.isNaN(parsed.getTime())) {
-    return `${parsed.getFullYear()}-${String(
-      parsed.getMonth() + 1
-    ).padStart(2, "0")}-${String(
-      parsed.getDate()
-    ).padStart(2, "0")}`;
+    let date = new Date(year, month, day);
+    if (
+      !natural[5] &&
+      date.getTime() < today.getTime()
+    ) {
+      year += 1;
+      date = new Date(year, month, day);
+    }
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month &&
+      date.getDate() === day
+    ) return toISO(date);
   }
 
   return null;
@@ -336,59 +467,54 @@ function normalizeDate(
    TIME NORMALIZER
 ========================================================= */
 
-function normalizeTime(
-  input: string
-): string | null {
-  const text = normalize(input)
-    .replace(/\bnoon\b/, "12 pm")
-    .replace(/\bmidnight\b/, "12 am");
+function normalizeTime(input: string): string | null {
+  const text = wordsToDigits(input)
+    .toLowerCase()
+    .replace(/\./g, "")
+    .replace(/\bp\s*m\b/g, "pm")
+    .replace(/\ba\s*m\b/g, "am")
+    .replace(/\bnoon\b/g, "12 pm")
+    .replace(/\bmidnight\b/g, "12 am")
+    .replace(/\bo['’]?clock\b/g, "")
+    .replace(/\s+in\s+the\s+morning/g, " am")
+    .replace(/\s+in\s+the\s+(?:afternoon|evening)/g, " pm")
+    .replace(/\b(?:at|around|about|i prefer|prefer|time is|appointment at)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  const match = text.match(
-    /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/
+  const meridian = text.match(
+    /(?:^|\s)(\d{1,2})(?:(?::|\s)(\d{1,2}))?\s*(am|pm)(?:\s|$)/
   );
 
-  if (!match) return null;
+  if (meridian) {
+    let hour = Number(meridian[1]);
+    const minute = Number(meridian[2] || "0");
+    const suffix = meridian[3];
 
-  let hour = Number(match[1]);
+    if (hour < 1 || hour > 12 || minute > 59) return null;
+    if (suffix === "pm" && hour !== 12) hour += 12;
+    if (suffix === "am" && hour === 12) hour = 0;
 
-  const minute = Number(
-    match[2] || "0"
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+
+  const clock24 = text.match(
+    /(?:^|\s)([01]?\d|2[0-3]):([0-5]\d)(?:\s|$)/
   );
 
-  const meridiem = match[3];
-
-  if (minute > 59) {
-    return null;
+  if (clock24) {
+    return `${String(Number(clock24[1])).padStart(2, "0")}:${clock24[2]}`;
   }
 
-  if (meridiem) {
-    if (hour < 1 || hour > 12) {
-      return null;
-    }
-
-    if (
-      meridiem === "pm" &&
-      hour !== 12
-    ) {
-      hour += 12;
-    }
-
-    if (
-      meridiem === "am" &&
-      hour === 12
-    ) {
-      hour = 0;
-    }
-  } else {
-    if (hour > 23) {
-      return null;
-    }
+  const bareHour = text.match(/^(\d{1,2})$/);
+  if (bareHour) {
+    let hour = Number(bareHour[1]);
+    if (hour < 1 || hour > 23) return null;
+    if (hour >= 1 && hour <= 7) hour += 12;
+    return `${String(hour).padStart(2, "0")}:00`;
   }
 
-  return `${String(hour).padStart(
-    2,
-    "0"
-  )}:${String(minute).padStart(2, "0")}`;
+  return null;
 }
 
 /* =========================================================
@@ -435,6 +561,71 @@ function prettyTime(value: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+
+/* =========================================================
+   FINAL BOOKING VALIDATION
+   Important: bookingDataRef already stores canonical values.
+   Do not destructively re-parse valid canonical values at submit time.
+========================================================= */
+
+function isCanonicalTreatment(value: string): boolean {
+  return CANONICAL_TREATMENTS.some((item) => item.name === value);
+}
+
+function isCanonicalDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return false;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+
+  return date.getTime() >= today.getTime();
+}
+
+function isCanonicalTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function getFirstInvalidBookingStep(data: BookingData): BookingStep | null {
+  if (!cleanPatientName(data.name)) return "name";
+  if (!normalizePhone(data.phone)) return "phone";
+  if (!normalizeEmail(data.email)) return "email";
+  if (!isCanonicalTreatment(data.treatment)) return "treatment";
+  if (!isCanonicalDate(data.appointmentDate)) return "date";
+  if (!isCanonicalTime(data.appointmentTime)) return "time";
+  return null;
+}
+
+function promptForBookingStep(step: BookingStep): string {
+  switch (step) {
+    case "name":
+      return "I need your full name again. Please say only your full name.";
+    case "phone":
+      return "I need your phone number again. Please say only the digits slowly.";
+    case "email":
+      return "I need your email again. Please say it like taha at gmail dot com.";
+    case "treatment":
+      return "I need the treatment again. Please say teeth whitening, dental implants, root canal treatment, orthodontics, cosmetic dentistry, general dentistry, or emergency dental care.";
+    case "date":
+      return "I need the appointment date again. Please say a future date, for example 12 August 2026.";
+    case "time":
+      return "I need the appointment time again. Please say a short time, for example 2 PM or 5 30 PM.";
+    default:
+      return "Please tell me the missing appointment detail.";
+  }
 }
 
 /* =========================================================
@@ -485,8 +676,20 @@ export default function VoiceAgent({
       ...EMPTY_BOOKING,
     });
 
-  const lastSpokenTextRef =
-    useRef("");
+  const lastSpokenTextRef = useRef("");
+  const lastProcessedRef = useRef({ text: "", at: 0 });
+  const aiAbortRef = useRef<AbortController | null>(null);
+  const speechGenerationRef = useRef(0);
+
+  // Production listening pipeline:
+  // collect fragmented final STT results into one patient turn,
+  // debounce briefly, then process once.
+  const finalSpeechBufferRef = useRef("");
+  const finalSpeechTimerRef = useRef<number | null>(null);
+  const recognitionRestartTimerRef = useRef<number | null>(null);
+  const recognitionRestartAttemptsRef = useRef(0);
+  const lastRecognitionStartRef = useRef(0);
+  const bargeInCandidateRef = useRef({ text: "", at: 0 });
 
   /* =======================================================
      STATE
@@ -557,16 +760,25 @@ export default function VoiceAgent({
 
   const clearListenTimer =
     useCallback(() => {
-      if (
-        listenTimerRef.current !== null
-      ) {
-        window.clearTimeout(
-          listenTimerRef.current
-        );
-
+      if (listenTimerRef.current !== null) {
+        window.clearTimeout(listenTimerRef.current);
         listenTimerRef.current = null;
       }
     }, []);
+
+  const clearFinalSpeechTimer = useCallback(() => {
+    if (finalSpeechTimerRef.current !== null) {
+      window.clearTimeout(finalSpeechTimerRef.current);
+      finalSpeechTimerRef.current = null;
+    }
+  }, []);
+
+  const clearRecognitionRestartTimer = useCallback(() => {
+    if (recognitionRestartTimerRef.current !== null) {
+      window.clearTimeout(recognitionRestartTimerRef.current);
+      recognitionRestartTimerRef.current = null;
+    }
+  }, []);
 
   /* =======================================================
      RECOGNITION CONTROL
@@ -594,6 +806,30 @@ export default function VoiceAgent({
         false;
     }, [clearListenTimer]);
 
+  const scheduleMicroRestart = useCallback((delay = 250) => {
+    clearRecognitionRestartTimer();
+
+    recognitionRestartTimerRef.current = window.setTimeout(() => {
+      recognitionRestartTimerRef.current = null;
+
+      if (
+        !openRef.current ||
+        mutedRef.current ||
+        recognitionRunningRef.current
+      ) {
+        return;
+      }
+
+      try {
+        recognitionRef.current?.start();
+        recognitionRunningRef.current = true;
+        lastRecognitionStartRef.current = Date.now();
+      } catch {
+        // onend/onerror will schedule the next safe attempt.
+      }
+    }, Math.max(180, delay));
+  }, [clearRecognitionRestartTimer]);
+
   const startListening =
     useCallback(() => {
       if (
@@ -612,16 +848,23 @@ export default function VoiceAgent({
       }
 
       clearListenTimer();
+      clearRecognitionRestartTimer();
 
       intentionalStopRef.current = false;
-
       setErrorMessage("");
 
-      try {
-        recognition.start();
+      // Chrome can throw InvalidStateError when start() is called repeatedly.
+      const sinceLastStart = Date.now() - lastRecognitionStartRef.current;
+      if (sinceLastStart < 180) {
+        scheduleMicroRestart(180 - sinceLastStart);
+        return;
+      }
 
-        recognitionRunningRef.current =
-          true;
+      try {
+        lastRecognitionStartRef.current = Date.now();
+        recognition.start();
+        recognitionRunningRef.current = true;
+        recognitionRestartAttemptsRef.current = 0;
 
         if (mountedRef.current) {
           setState(
@@ -637,7 +880,11 @@ export default function VoiceAgent({
           error
         );
       }
-    }, [clearListenTimer]);
+    }, [
+      clearListenTimer,
+      clearRecognitionRestartTimer,
+      scheduleMicroRestart,
+    ]);
 
   const scheduleListening =
     useCallback(
@@ -670,6 +917,9 @@ export default function VoiceAgent({
         window.speechSynthesis?.cancel();
       }
 
+      speechGenerationRef.current += 1;
+      aiAbortRef.current?.abort();
+      aiAbortRef.current = null;
       speakingRef.current = false;
 
       lastSpokenTextRef.current = "";
@@ -734,15 +984,24 @@ export default function VoiceAgent({
         .replace(/\s+/g, " ")
         .trim();
 
+      // Voice agents should not read essay-length answers. Keep speech
+      // interruptible and concise; the full text can still remain in UI.
+      const spokenText =
+        cleanText.length > 280
+          ? `${cleanText.slice(0, 260).replace(/\s+\S*$/, "")}.`
+          : cleanText;
+
+      const generation = ++speechGenerationRef.current;
+
       lastSpokenTextRef.current =
-        normalize(cleanText);
+        normalize(spokenText);
 
       const utterance =
         new SpeechSynthesisUtterance(
-          cleanText
+          spokenText
         );
 
-      utterance.rate = 0.98;
+      utterance.rate = 1.02;
       utterance.pitch = 1;
       utterance.volume = 1;
 
@@ -764,6 +1023,7 @@ export default function VoiceAgent({
       }
 
       utterance.onstart = () => {
+        if (generation !== speechGenerationRef.current) return;
         speakingRef.current = true;
 
         if (mountedRef.current) {
@@ -771,29 +1031,13 @@ export default function VoiceAgent({
           setState("speaking");
         }
 
-        /*
-          IMPORTANT:
-          Recognition ko Nova speaking ke
-          waqt bhi active rakhte hain.
-
-          Is se:
-          stop
-          wait
-          hold on
-          nova stop
-
-          detect ho sakta hai.
-        */
-
-        if (
-          !mutedRef.current &&
-          !recognitionRunningRef.current
-        ) {
-          scheduleListening(120);
-        }
+        // Keep recognition alive while Nova speaks so the user can barge in
+        // with a short command such as "stop" or "wait". Echo is filtered
+        // before normal user speech is processed.
       };
 
       utterance.onend = () => {
+        if (generation !== speechGenerationRef.current) return;
         speakingRef.current = false;
 
         lastSpokenTextRef.current = "";
@@ -831,7 +1075,7 @@ export default function VoiceAgent({
 
         if (
           speechError ===
-            "interrupted" ||
+          "interrupted" ||
           speechError === "canceled"
         ) {
           if (
@@ -939,105 +1183,159 @@ export default function VoiceAgent({
   /* =======================================================
      SUBMIT BOOKING
   ======================================================= */
+const submitBooking =
+  useCallback(async () => {
+    /*
+      CRITICAL FIX:
+      The booking flow already saves canonical values into bookingDataRef.
+      The old code re-parsed every field at submit time and could turn a
+      valid value into null, then reset the whole booking to "name".
+      We now validate canonical state without destroying it.
+    */
+    const current: BookingData = {
+      ...bookingDataRef.current,
+    };
 
-  const submitBooking =
-    useCallback(async () => {
-      const data =
-        bookingDataRef.current;
+    const invalidStep = getFirstInvalidBookingStep(current);
 
-      setState("thinking");
+    if (invalidStep) {
+      console.warn("VOICE BOOKING VALIDATION FAILED:", {
+        invalidStep,
+        booking: current,
+      });
 
+      // Keep every valid field. Clear only the bad field.
+      const fieldByStep: Partial<Record<BookingStep, keyof BookingData>> = {
+        name: "name",
+        phone: "phone",
+        email: "email",
+        treatment: "treatment",
+        date: "appointmentDate",
+        time: "appointmentTime",
+      };
+
+      const badField = fieldByStep[invalidStep];
+
+      if (badField) {
+        const next = {
+          ...current,
+          [badField]: "",
+        } as BookingData;
+
+        bookingDataRef.current = next;
+        setBookingData(next);
+      }
+
+      moveBookingStep(invalidStep);
+
+      const reply = promptForBookingStep(invalidStep);
+      setAgentReply(reply);
       setErrorMessage("");
+      speak(reply, true);
+      return;
+    }
 
-      try {
-        console.log(
-          "VOICE BOOKING SUBMIT:",
-          data
+    // Canonical payload: preserve exactly what the booking flow collected.
+    const data: BookingData = {
+      name: cleanPatientName(current.name)!,
+      phone: normalizePhone(current.phone)!,
+      email: normalizeEmail(current.email)!,
+      treatment: current.treatment,
+      appointmentDate: current.appointmentDate,
+      appointmentTime: current.appointmentTime,
+    };
+
+    bookingDataRef.current = data;
+    setBookingData(data);
+
+    setState("thinking");
+    setErrorMessage("");
+
+    try {
+      console.log("VOICE BOOKING SUBMIT:", {
+        ...data,
+        source: "AI Voice Agent",
+      });
+
+      const response = await fetch("/api/book-chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: data.name,
+          phone: data.phone,
+          email: data.email,
+          treatment: data.treatment,
+          appointmentDate: data.appointmentDate,
+          appointmentTime: data.appointmentTime,
+          source: "AI Voice Agent",
+        }),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      console.log("VOICE BOOKING RESPONSE:", {
+        status: response.status,
+        result,
+      });
+
+      if (!response.ok || result?.success !== true) {
+        throw new Error(
+          typeof result?.error === "string"
+            ? result.error
+            : `Booking failed with status ${response.status}`
         );
+      }
 
-        const response = await fetch(
-          "/api/book-chat",
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-
-            body: JSON.stringify({
-              name: data.name,
-              phone: data.phone,
-              email: data.email,
-              treatment:
-                data.treatment,
-              appointmentDate:
-                data.appointmentDate,
-              appointmentTime:
-                data.appointmentTime,
-            }),
-          }
-        );
-
-        const result =
-          await response
-            .json()
-            .catch(() => null);
-
-        console.log(
-          "VOICE BOOKING RESPONSE:",
-          result
-        );
-
-        if (
-          !response.ok ||
-          !result?.success
-        ) {
-          throw new Error(
-            result?.error ||
-              `Booking failed with status ${response.status}`
-          );
-        }
-
-        const reply = `Thank you, ${
-          data.name
-        }. Your appointment request for ${
-          data.treatment
-        } on ${prettyDate(
-          data.appointmentDate
-        )} at ${prettyTime(
-          data.appointmentTime
-        )} has been submitted successfully. Our clinic team will review availability and contact you to confirm.`;
+      if (result?.duplicate === true) {
+        const duplicateReply =
+          `Thank you, ${data.name}. This appointment request has already been submitted. ` +
+          `You do not need to book it again. Our clinic team will review it and contact you.`;
 
         resetBooking();
-
-        setAgentReply(reply);
-
-        speak(reply, true);
-      } catch (error) {
-        console.error(
-          "VOICE BOOKING ERROR:",
-          error
-        );
-
-        const reply =
-          "I could not submit your appointment request right now. Your details are still saved in this voice session. Say confirm to try again, or cancel to stop.";
-
-        moveBookingStep("confirm");
-
-        setAgentReply(reply);
-
-        setErrorMessage(
-          "Booking submission failed."
-        );
-
-        speak(reply, true);
+        setAgentReply(duplicateReply);
+        setErrorMessage("");
+        speak(duplicateReply, true);
+        return;
       }
-    }, [
-      moveBookingStep,
-      resetBooking,
-      speak,
-    ]);
+
+      const reply =
+        `Thank you, ${data.name}. Your appointment request for ${data.treatment} ` +
+        `on ${prettyDate(data.appointmentDate)} at ${prettyTime(data.appointmentTime)} ` +
+        `has been submitted successfully. Our clinic team will review availability and contact you to confirm.`;
+
+      resetBooking();
+      setAgentReply(reply);
+      setErrorMessage("");
+      speak(reply, true);
+    } catch (error) {
+      console.error("VOICE BOOKING ERROR:", error);
+
+      /*
+        Do NOT reset booking data after API/network failure.
+        User can say "confirm" and retry with the same validated details.
+      */
+      moveBookingStep("confirm");
+
+      const reply =
+        "I could not submit your appointment request right now. " +
+        "Your details are still saved in this voice session. " +
+        "Say confirm to try again, or cancel to stop.";
+
+      setAgentReply(reply);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Booking submission failed."
+      );
+      speak(reply, true);
+    }
+  }, [
+    moveBookingStep,
+    resetBooking,
+    speak,
+  ]);
 
   /* =======================================================
      BOOKING INPUT PROCESSOR
@@ -1070,7 +1368,7 @@ export default function VoiceAgent({
 
           const cleanName = cleanPatientName(text);
 
-          if (cleanName.length < 2 || cleanName.length > 60) {
+          if (!cleanName) {
             const reply = "I did not catch your name clearly. Please say only your full name, for example Muhammad Taha.";
             setAgentReply(reply);
             speak(reply, true);
@@ -1090,89 +1388,27 @@ export default function VoiceAgent({
         }
 
         /* ---------------- PHONE ---------------- */
-
         if (step === "phone") {
-          const phone = text.replace(
-            /[^\d+]/g,
-            ""
-          );
-
-          if (
-            phone.replace(/\D/g, "")
-              .length < 7
-          ) {
-            const reply =
-              "I did not catch a valid phone number. Please say the number again slowly.";
-
-            setAgentReply(reply);
-
-            speak(reply, true);
-
-            return;
+          const phone = normalizePhone(text);
+          if (!phone) {
+            const reply = "I missed part of the number. Please say only the digits slowly, for example zero three two one, seven six one, eight two zero nine.";
+            setAgentReply(reply); speak(reply, true); return;
           }
-
-          updateBooking({
-            phone,
-          });
-
-          moveBookingStep("email");
-
-          const reply =
-            "Thank you. What is your email address? You can say something like name at gmail dot com.";
-
-          setAgentReply(reply);
-
-          speak(reply, true);
-
-          return;
+          updateBooking({ phone }); moveBookingStep("email");
+          const reply = `I heard ${speakablePhone(phone)}. Saved. Now say your email like taha at gmail dot com.`;
+          setAgentReply(reply); speak(reply, true); return;
         }
 
         /* ---------------- EMAIL ---------------- */
-
         if (step === "email") {
-          const email = text
-            .toLowerCase()
-            .replace(
-              /\s+at\s+/g,
-              "@"
-            )
-            .replace(
-              /\s+dot\s+/g,
-              "."
-            )
-            .replace(/\s/g, "");
-
-          if (
-            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-              email
-            )
-          ) {
-            const reply =
-              "I did not catch a valid email address. Please say it again. For example, name at gmail dot com.";
-
-            setAgentReply(reply);
-
-            speak(reply, true);
-
-            return;
+          const email = normalizeEmail(text);
+          if (!email) {
+            const reply = "I missed part of the email. Please say only the address slowly, like taha at gmail dot com.";
+            setAgentReply(reply); speak(reply, true); return;
           }
-
-          updateBooking({
-            email,
-          });
-
-          moveBookingStep(
-            "treatment"
-          );
-
-          const reply =
-            "Which treatment are you interested in? For example teeth whitening, dental implants, root canal treatment, orthodontics, cosmetic dentistry, general dentistry, or emergency dental care.";
-
-          setAgentReply(reply);
-
-          speak(reply, true);
-
-          return;
+          updateBooking({ email }); moveBookingStep("treatment");
+          const reply = `I heard ${speakableEmail(email)}. Saved. Which treatment would you like? Say teeth whitening, implants, root canal, braces, general dentistry, cosmetic dentistry, or emergency dental care.`;
+          setAgentReply(reply); speak(reply, true); return;
         }
 
         /* ---------------- TREATMENT ---------------- */
@@ -1256,7 +1492,7 @@ export default function VoiceAgent({
 
           if (!time) {
             const reply =
-              "I could not understand that time. Please say something like 5 PM or 10 30 AM.";
+              "I missed the time. Please say only a short time, for example 2 PM, 5 30 PM, or 10 AM.";
 
             setAgentReply(reply);
 
@@ -1274,15 +1510,7 @@ export default function VoiceAgent({
             "confirm"
           );
 
-          const reply = `Please confirm your appointment request. Name ${
-            next.name
-          }. Treatment ${
-            next.treatment
-          }. Date ${prettyDate(
-            next.appointmentDate
-          )}. Time ${prettyTime(
-            next.appointmentTime
-          )}. Say confirm to submit, or cancel to stop.`;
+          const reply = `Please confirm. Name ${next.name}. Phone ${speakablePhone(next.phone)}. Email ${speakableEmail(next.email)}. Treatment ${next.treatment}. Date ${prettyDate(next.appointmentDate)}. Time ${prettyTime(next.appointmentTime)}. Say confirm to submit, or cancel to stop.`;
 
           setAgentReply(reply);
 
@@ -1344,6 +1572,10 @@ export default function VoiceAgent({
 
       setErrorMessage("");
 
+      aiAbortRef.current?.abort();
+      const controller = new AbortController();
+      aiAbortRef.current = controller;
+
       try {
         const response = await fetch(
           "/api/chat",
@@ -1359,6 +1591,7 @@ export default function VoiceAgent({
               message,
               mode: "voice",
             }),
+            signal: controller.signal,
           }
         );
 
@@ -1370,14 +1603,14 @@ export default function VoiceAgent({
         if (!response.ok) {
           throw new Error(
             data?.reply ||
-              `AI request failed with status ${response.status}`
+            `AI request failed with status ${response.status}`
           );
         }
 
         const reply =
           typeof data?.reply ===
             "string" &&
-          data.reply.trim()
+            data.reply.trim()
             ? data.reply.trim()
             : "I am sorry, I could not answer that right now.";
 
@@ -1389,6 +1622,10 @@ export default function VoiceAgent({
 
         speak(reply, true);
       } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
         console.error(
           "VOICE AGENT AI ERROR:",
           error
@@ -1427,6 +1664,46 @@ export default function VoiceAgent({
 
         if (!text) {
           return;
+        }
+
+        const normalizedNow = normalize(text);
+        const now = Date.now();
+        const previous = lastProcessedRef.current;
+
+        const duplicate =
+          previous.text === normalizedNow ||
+          (
+            previous.text.length > 0 &&
+            normalizedNow.length > 0 &&
+            (
+              previous.text.includes(normalizedNow) ||
+              normalizedNow.includes(previous.text)
+            )
+          );
+
+        if (duplicate && now - previous.at < 2500) return;
+
+        lastProcessedRef.current = {
+          text: normalizedNow,
+          at: now,
+        };
+
+        // Ignore Nova's own TTS echo before evaluating commands. This is
+        // essential because recognition stays active for real barge-in.
+        if (speakingRef.current && lastSpokenTextRef.current) {
+          const own = lastSpokenTextRef.current;
+          const heard = normalizedNow;
+          const heardWords = heard.split(" ").filter(Boolean);
+          const overlap = heardWords.filter((word) => own.includes(word)).length;
+          const looksLikeEcho =
+            heard.length >= 8 &&
+            (own.includes(heard) ||
+              heard.includes(own.slice(0, Math.min(40, own.length))) ||
+              overlap / Math.max(heardWords.length, 1) >= 0.8);
+
+          if (looksLikeEcho && !isStopCommand(heard)) {
+            return;
+          }
         }
 
         setTranscript(text);
@@ -1551,7 +1828,7 @@ export default function VoiceAgent({
       karte hain.
     */
 
-    recognition.continuous = false;
+    recognition.continuous = true;
 
     /*
       IMPORTANT:
@@ -1565,71 +1842,118 @@ export default function VoiceAgent({
 
     /* ---------------- RESULT ---------------- */
 
-    recognition.onresult = (
-      event
-    ) => {
-      let combined = "";
+    recognition.onresult = (event) => {
+      const startIndex = event.resultIndex ?? 0;
+      let interimText = "";
+      const finalParts: string[] = [];
 
-      const length =
-        event.results.length;
+      for (let i = startIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const piece = result?.[0]?.transcript?.trim() || "";
+        if (!piece) continue;
 
-      for (
-        let i =
-          event.resultIndex ?? 0;
-        i < length;
-        i += 1
-      ) {
-        combined += `${
-          event.results[i]?.[0]
-            ?.transcript || ""
-        } `;
+        if (result.isFinal === true) {
+          finalParts.push(piece);
+        } else {
+          interimText += `${piece} `;
+        }
       }
 
-      const spokenText =
-        combined.trim();
+      const liveText = interimText.trim();
 
-      if (!spokenText) {
-        return;
-      }
-
-      /*
-        STOP COMMAND:
-        Final result ka wait nahi.
-        Interim result par hi stop.
-      */
-
+      // TRUE BARGE-IN:
+      // detect stop/wait/pause from interim STT immediately, before finalization.
       if (
         speakingRef.current &&
-        isStopCommand(spokenText)
+        liveText &&
+        (isStopCommand(liveText) || isImmediateStopCommand(liveText))
       ) {
+        finalSpeechBufferRef.current = "";
+        clearFinalSpeechTimer();
         interruptSpeech();
-
         return;
       }
 
-      const lastIndex =
-        Math.max(
-          0,
-          length - 1
-        );
+      // While Nova speaks, ignore likely loudspeaker echo. But do NOT blindly
+      // ignore all patient speech: a genuine new utterance can interrupt Nova.
+      if (speakingRef.current && liveText) {
+        if (looksLikeOwnSpeech(liveText, lastSpokenTextRef.current)) {
+          return;
+        }
 
-      const isFinal =
-        event.results[lastIndex]
-          ?.isFinal === true;
+        const candidate = normalize(liveText);
+        const previousCandidate = bargeInCandidateRef.current;
 
-      if (!isFinal) {
+        // Require a small amount of stable non-echo speech before cancelling
+        // TTS. This prevents random room noise from interrupting Nova.
+        if (
+          candidate.split(" ").length >= 2 &&
+          previousCandidate.text &&
+          (
+            candidate.includes(previousCandidate.text) ||
+            previousCandidate.text.includes(candidate)
+          ) &&
+          Date.now() - previousCandidate.at < 1400
+        ) {
+          window.speechSynthesis?.cancel();
+          speechGenerationRef.current += 1;
+          speakingRef.current = false;
+          lastSpokenTextRef.current = "";
+        } else {
+          bargeInCandidateRef.current = {
+            text: candidate,
+            at: Date.now(),
+          };
+        }
+      }
+
+      const finalText = finalParts.join(" ").trim();
+      if (!finalText) return;
+
+      if (isStopCommand(finalText) || isImmediateStopCommand(finalText)) {
+        finalSpeechBufferRef.current = "";
+        clearFinalSpeechTimer();
+        interruptSpeech();
         return;
       }
 
-      recognitionRunningRef.current =
-        false;
+      // Reject Nova's own TTS echo, but preserve real patient speech.
+      if (
+        speakingRef.current &&
+        looksLikeOwnSpeech(finalText, lastSpokenTextRef.current)
+      ) {
+        return;
+      }
 
-      intentionalStopRef.current =
-        true;
+      if (speakingRef.current) {
+        window.speechSynthesis?.cancel();
+        speechGenerationRef.current += 1;
+        speakingRef.current = false;
+        lastSpokenTextRef.current = "";
+      }
 
-      void processUserSpeech(
-        spokenText
-      );
+      // Chrome often finalizes one sentence as several tiny chunks.
+      // Aggregate them and process one patient turn after a short silence.
+      finalSpeechBufferRef.current = [
+        finalSpeechBufferRef.current,
+        finalText,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      clearFinalSpeechTimer();
+
+      finalSpeechTimerRef.current = window.setTimeout(() => {
+        finalSpeechTimerRef.current = null;
+
+        const completeTurn = finalSpeechBufferRef.current.trim();
+        finalSpeechBufferRef.current = "";
+
+        if (!completeTurn) return;
+        void processUserSpeech(completeTurn);
+      }, bookingStepRef.current === "phone" ? 900 : 520);
     };
 
     /* ---------------- ERROR ---------------- */
@@ -1643,24 +1967,29 @@ export default function VoiceAgent({
       recognitionRunningRef.current =
         false;
 
-      console.log(
-        "VOICE RECOGNITION ERROR:",
-        recognitionError
-      );
+      if (!["no-speech", "aborted"].includes(recognitionError)) {
+        console.warn("VOICE RECOGNITION ERROR:", recognitionError);
+      }
 
-      if (
-        recognitionError ===
-          "aborted" ||
-        recognitionError ===
-          "no-speech"
-      ) {
-        if (
-          openRef.current &&
-          !mutedRef.current
-        ) {
-          scheduleListening(350);
+      if (recognitionError === "aborted") {
+        return;
+      }
+
+      if (recognitionError === "no-speech") {
+        // Silence is normal, not a user-facing error. Restart with a tiny
+        // backoff so Chrome does not enter a rapid start/end loop.
+        recognitionRestartAttemptsRef.current = Math.min(
+          recognitionRestartAttemptsRef.current + 1,
+          5
+        );
+
+        if (openRef.current && !mutedRef.current) {
+          const backoff = Math.min(
+            350 + recognitionRestartAttemptsRef.current * 180,
+            1200
+          );
+          scheduleListening(speakingRef.current ? 220 : backoff);
         }
-
         return;
       }
 
@@ -1705,36 +2034,19 @@ export default function VoiceAgent({
     /* ---------------- END ---------------- */
 
     recognition.onend = () => {
-      recognitionRunningRef.current =
-        false;
+      recognitionRunningRef.current = false;
+      intentionalStopRef.current = false;
 
-      const wasIntentional =
-        intentionalStopRef.current;
+      if (!openRef.current || mutedRef.current) return;
 
-      intentionalStopRef.current =
-        false;
+      const delay = speakingRef.current
+        ? 180
+        : Math.min(
+            280 + recognitionRestartAttemptsRef.current * 120,
+            900
+          );
 
-      if (
-        !openRef.current ||
-        mutedRef.current
-      ) {
-        return;
-      }
-
-      /*
-        Nova speaking ho tab bhi
-        recognition restart.
-
-        Isi se stop command
-        possible hota hai.
-      */
-
-      if (
-        !wasIntentional ||
-        speakingRef.current
-      ) {
-        scheduleListening(250);
-      }
+      scheduleListening(delay);
     };
 
     recognitionRef.current =
@@ -1751,6 +2063,9 @@ export default function VoiceAgent({
 
     return () => {
       clearListenTimer();
+      clearFinalSpeechTimer();
+      clearRecognitionRestartTimer();
+      finalSpeechBufferRef.current = "";
 
       intentionalStopRef.current =
         true;
@@ -1768,6 +2083,8 @@ export default function VoiceAgent({
     };
   }, [
     clearListenTimer,
+    clearFinalSpeechTimer,
+    clearRecognitionRestartTimer,
     interruptSpeech,
     open,
     processUserSpeech,
@@ -1788,6 +2105,9 @@ export default function VoiceAgent({
         false;
 
       clearListenTimer();
+      clearFinalSpeechTimer();
+      clearRecognitionRestartTimer();
+      finalSpeechBufferRef.current = "";
 
       hardStopRecognition();
 
@@ -1803,6 +2123,9 @@ export default function VoiceAgent({
           null;
       }
 
+      aiAbortRef.current?.abort();
+      aiAbortRef.current = null;
+      speechGenerationRef.current += 1;
       window.speechSynthesis?.cancel();
 
       speakingRef.current = false;
@@ -1875,6 +2198,8 @@ export default function VoiceAgent({
   }, [
     open,
     clearListenTimer,
+    clearFinalSpeechTimer,
+    clearRecognitionRestartTimer,
     hardStopRecognition,
     resetBooking,
     speak,
@@ -1955,18 +2280,18 @@ export default function VoiceAgent({
     state === "connecting"
       ? "Connecting"
       : state === "listening"
-      ? "Listening"
-      : state === "thinking"
-      ? "Nova is thinking"
-      : state === "speaking"
-      ? "Nova is speaking"
-      : state === "booking"
-      ? "Booking appointment"
-      : state === "error"
-      ? "Connection issue"
-      : muted
-      ? "Microphone muted"
-      : "Ready";
+        ? "Listening"
+        : state === "thinking"
+          ? "Nova is thinking"
+          : state === "speaking"
+            ? "Nova is speaking"
+            : state === "booking"
+              ? "Booking appointment"
+              : state === "error"
+                ? "Connection issue"
+                : muted
+                  ? "Microphone muted"
+                  : "Ready";
 
   /* =======================================================
      UI
@@ -1986,7 +2311,7 @@ export default function VoiceAgent({
 
       {/* MODAL */}
 
-      <div className="relative z-10 max-h-[94vh] w-full max-w-[460px] overflow-y-auto rounded-[32px] border border-white/10 bg-[#061A4A] shadow-[0_35px_100px_rgba(2,6,23,0.55)]">
+      <div className="relative z-10 max-h-[94vh] w-full max-w-[460px] overflow-x-hidden overflow-y-auto rounded-[32px] border border-white/10 bg-[#061A4A] shadow-[0_35px_100px_rgba(2,6,23,0.55)]">
 
         {/* GLOWS */}
 
@@ -2046,13 +2371,12 @@ export default function VoiceAgent({
           <div className="relative mx-auto mt-8 flex h-40 w-40 items-center justify-center">
 
             <div
-              className={`absolute inset-0 rounded-full bg-cyan-400/10 blur-xl ${
-                state === "speaking" ||
-                state === "listening" ||
-                state === "booking"
+              className={`absolute inset-0 rounded-full bg-cyan-400/10 blur-xl ${state === "speaking" ||
+                  state === "listening" ||
+                  state === "booking"
                   ? "animate-pulse"
                   : ""
-              }`}
+                }`}
             />
 
             <div className="absolute inset-3 rounded-full border border-cyan-300/20 bg-gradient-to-br from-blue-500/20 to-cyan-400/20" />
@@ -2098,16 +2422,15 @@ export default function VoiceAgent({
               ) => (
                 <span
                   key={index}
-                  className={`w-1 rounded-full bg-gradient-to-t from-blue-500 to-cyan-300 ${
-                    state ===
+                  className={`w-1 rounded-full bg-gradient-to-t from-blue-500 to-cyan-300 ${state ===
                       "listening" ||
-                    state ===
+                      state ===
                       "speaking" ||
-                    state ===
+                      state ===
                       "booking"
                       ? "animate-pulse"
                       : "opacity-40"
-                  }`}
+                    }`}
                   style={{
                     height,
                     animationDelay: `${index * 70}ms`,
@@ -2188,11 +2511,10 @@ export default function VoiceAgent({
               onClick={
                 handleMuteToggle
               }
-              className={`flex h-14 w-14 items-center justify-center rounded-full border transition ${
-                muted
+              className={`flex h-14 w-14 items-center justify-center rounded-full border transition ${muted
                   ? "border-amber-300/30 bg-amber-400/15 text-amber-200"
                   : "border-white/10 bg-white/10 text-white hover:bg-white/15"
-              }`}
+                }`}
               aria-label={
                 muted
                   ? "Unmute microphone"
